@@ -1,0 +1,46 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+*.egg-info/
+build/
+dist/
+
+# Local environments and editor files
+.venv/
+venv/
+env/
+.env
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Experiment outputs and caches
+outputs/
+runs/
+wandb/
+mlruns/
+logs/
+*.log
+
+# Data, model weights, and large generated artifacts
+data/
+datasets/
+weights/
+checkpoints/
+*.pt
+*.pth
+*.ckpt
+*.onnx
+*.npz
+*.npy
+*.tar
+*.tar.gz
+*.tgz
+*.zip
+*.rar
+
+# Temporary files
+tmp/
+temp/

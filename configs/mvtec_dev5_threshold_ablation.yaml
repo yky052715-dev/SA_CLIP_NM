@@ -1,0 +1,62 @@
+experiment:
+  name: sa_clip_nm_dev5_threshold_ablation
+  protocol_stage: development
+  seed: 42
+  output_dir: outputs/dev5_threshold_selection
+
+data:
+  dataset: mvtec
+  root: /home/ubuntu/yyk/datasets
+  categories:
+    - bottle
+    - metal_nut
+    - grid
+    - leather
+    - screw
+  image_size: 224
+  resize_mode: resize
+  calibration_fraction: 0.20
+  num_workers: 4
+
+model:
+  checkpoint: openai/clip-vit-base-patch16
+  candidate_layers: [3, 6, 9, 12]
+  active_layers: [3, 6]
+  token_norm: none
+  batch_size: 16
+
+memory:
+  sampling: kcenter
+  ratio: 0.10
+  projection_dim: 128
+  max_candidates: 50000
+
+retrieval:
+  spatial_mode: none
+  fixed_lambda: 0.05
+  query_chunk_size: 256
+  bank_chunk_size: 4096
+  lambda_max: 0.10
+  tau_quantile: 0.80
+
+calibration:
+  mad_epsilon: 1.0e-6
+  threshold_fit_fraction: 0.50
+  threshold_split_seed: 42
+  pixel_threshold_method: global_quantile
+  pixel_quantile: 0.995
+  pixel_image_quantile: 0.95
+  pixel_topk_fraction: 0.01
+  image_quantile: 0.99
+  clamp_min_zero: true
+
+inference:
+  gaussian_sigma: 0.0
+  image_score: topk_mean
+  image_topk_fraction: 0.01
+  save_visualizations: true
+  max_visualizations_per_category: 10
+
+evaluation:
+  compute_oracle_f1: true
+  save_predictions: false
