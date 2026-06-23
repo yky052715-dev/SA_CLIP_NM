@@ -43,6 +43,15 @@ from .memory import (
     save_memory_banks,
 )
 from .metrics import evaluate_binary_scores, flatten_metrics
+from .localization_diagnostics import save_localization_diagnostics
+from .localization_metrics import (
+    evaluate_localization_image,
+    summarize_localization_rows,
+)
+from .map_refinement import (
+    build_anomaly_map_outputs,
+    upsample_anomaly_maps,
+)
 from .retrieval import batched_layer_scores
 from .visualization import save_result_figure
 
@@ -284,6 +293,27 @@ def _fused_maps(
     return maps.cpu()
 
 
+def _configured_map_outputs(
+    raw_scores: dict[int, torch.Tensor],
+    layer_calibrations: dict[int, LayerCalibration],
+    config: dict[str, Any],
+):
+    inference = config["inference"]
+    return build_anomaly_map_outputs(
+        raw_scores=raw_scores,
+        layer_calibrations=layer_calibrations,
+        output_size=int(config["data"]["image_size"]),
+        clamp_min_zero=bool(config["calibration"]["clamp_min_zero"]),
+        gaussian_sigma=float(inference["gaussian_sigma"]),
+        layer_fusion=str(inference.get("layer_fusion", "mean")),
+        layer_fusion_epsilon=float(
+            inference.get("layer_fusion_epsilon", 1.0e-6)
+        ),
+        layer_weights=inference.get("layer_weights"),
+        upsample_mode=str(inference.get("upsample_mode", "bilinear")),
+    )
+
+
 def calibrate_category(
     category: str,
     config: dict[str, Any],
@@ -348,13 +378,12 @@ def calibrate_category(
             spatial_weight=spatial_weights[layer],
         )
 
-    calibration_maps = _fused_maps(
+    calibration_outputs = _configured_map_outputs(
         calibration_raw_scores,
         layer_calibrations,
-        image_size=int(config["data"]["image_size"]),
-        clamp_min_zero=bool(config["calibration"]["clamp_min_zero"]),
-        gaussian_sigma=float(config["inference"]["gaussian_sigma"]),
+        config,
     )
+    calibration_maps = calibration_outputs.anomaly_maps
     threshold_fit_indices = torch.tensor(
         payload["threshold_fit_indices"],
         dtype=torch.long,
@@ -456,6 +485,7 @@ def evaluate_category(
     pixel_labels: list[np.ndarray] = []
     pixel_scores: list[np.ndarray] = []
     samples: list[dict[str, object]] = []
+    localization_rows: list[dict[str, object]] = []
     inference_seconds = 0.0
 
     for batch in loader:
@@ -474,13 +504,12 @@ def evaluate_category(
             config,
             device,
         )
-        maps = _fused_maps(
+        map_outputs = _configured_map_outputs(
             raw_scores,
             calibration.layers,
-            image_size=int(config["data"]["image_size"]),
-            clamp_min_zero=bool(config["calibration"]["clamp_min_zero"]),
-            gaussian_sigma=float(config["inference"]["gaussian_sigma"]),
+            config,
         )
+        maps = map_outputs.anomaly_maps
         batch_image_scores = image_score_from_map(
             maps,
             method=calibration.image_score_method,
@@ -494,8 +523,31 @@ def evaluate_category(
         image_scores_all.extend(batch_image_scores.numpy().tolist())
         pixel_labels.extend([mask.reshape(-1) for mask in masks])
         pixel_scores.extend([score.numpy().reshape(-1) for score in maps])
+        for index in range(maps.shape[0]):
+            row = evaluate_localization_image(
+                ground_truth=masks[index],
+                anomaly_map=maps[index].numpy(),
+                threshold=calibration.pixel_threshold,
+                small_max_fraction=float(
+                    config["evaluation"].get("small_max_fraction", 0.005)
+                ),
+                medium_max_fraction=float(
+                    config["evaluation"].get("medium_max_fraction", 0.02)
+                ),
+            )
+            localization_rows.append(
+                {
+                    "path": str(batch["path"][index]),
+                    "defect_type": str(batch["defect_type"][index]),
+                    "label": int(labels[index]),
+                    **row,
+                }
+            )
 
-        if bool(config["inference"]["save_visualizations"]):
+
+        if bool(config["inference"]["save_visualizations"]) or bool(
+            config.get("diagnostics", {}).get("enabled", False)
+        ):
             for index in range(maps.shape[0]):
                 samples.append(
                     {
@@ -505,6 +557,13 @@ def evaluate_category(
                         "mask": masks[index],
                         "map": maps[index].numpy(),
                         "image_score": float(batch_image_scores[index].item()),
+                        "layer_patch_maps": {
+                            layer: values[index].numpy()
+                            for layer, values in map_outputs.layer_patch_maps.items()
+                        },
+                        "fused_patch_map": map_outputs.fused_patch_map[
+                            index
+                        ].numpy(),
                     }
                 )
 
@@ -520,8 +579,29 @@ def evaluate_category(
         calibrated_threshold=calibration.pixel_threshold,
         compute_oracle=bool(config["evaluation"]["compute_oracle_f1"]),
     )
+    localization_summary = summarize_localization_rows(localization_rows)
+    save_json(
+        localization_summary,
+        category_dir / "localization_metrics.json",
+    )
+    if localization_rows:
+        with (category_dir / "per_image_localization_metrics.csv").open(
+            "w", encoding="utf-8", newline=""
+        ) as handle:
+            writer = csv.DictWriter(
+                handle,
+                fieldnames=list(localization_rows[0].keys()),
+            )
+            writer.writeheader()
+            writer.writerows(localization_rows)
     result: dict[str, Any] = {
         "category": category,
+        **{
+            f"localization_{key}": value
+            for key, value in localization_summary.items()
+        },
+        "layer_fusion": str(config["inference"].get("layer_fusion", "mean")),
+        "upsample_mode": str(config["inference"].get("upsample_mode", "bilinear")),
         **flatten_metrics("image", image_metrics),
         **flatten_metrics("pixel", pixel_metrics),
         "image_threshold_calibrated": calibration.image_threshold,
@@ -556,6 +636,43 @@ def evaluate_category(
                 / "visualizations"
                 / f"{index:03d}_{sample['defect_type']}_{stem}.png",
                 title=f"{category}/{sample['defect_type']} score={sample['image_score']:.3f}",
+                color_max=color_max,
+            )
+    diagnostic_config = config.get("diagnostics", {})
+    if bool(diagnostic_config.get("enabled", False)):
+        diagnostic_limit = int(
+            diagnostic_config.get(
+                "max_samples_per_category",
+                config["inference"]["max_visualizations_per_category"],
+            )
+        )
+        diagnostic_samples = sorted(
+            samples,
+            key=lambda item: float(item["image_score"]),
+            reverse=True,
+        )[:diagnostic_limit]
+        color_max = max(calibration.pixel_threshold * 2.5, 1e-6)
+        for index, sample in enumerate(diagnostic_samples):
+            stem = Path(str(sample["path"])).stem
+            anomaly_map = np.asarray(sample["map"])
+            prediction = anomaly_map >= calibration.pixel_threshold
+            nearest_map = upsample_anomaly_maps(
+                torch.from_numpy(np.asarray(sample["fused_patch_map"]))[None],
+                output_size=anomaly_map.shape[0],
+                mode="nearest",
+                gaussian_sigma=0.0,
+            )[0].numpy()
+            save_localization_diagnostics(
+                output_dir=category_dir / "diagnostic_maps",
+                prefix=f"{index:03d}_{sample['defect_type']}_{stem}",
+                image=np.asarray(sample["image"]),
+                ground_truth=np.asarray(sample["mask"]),
+                anomaly_map=anomaly_map,
+                nearest_map=nearest_map,
+                prediction=prediction,
+                layer_patch_maps=sample["layer_patch_maps"],
+                fused_patch_map=np.asarray(sample["fused_patch_map"]),
+                threshold=calibration.pixel_threshold,
                 color_max=color_max,
             )
     return result
@@ -648,6 +765,8 @@ def run_experiment(
             "token_norm": feature_spec.token_norm,
             "patch_count": feature_spec.patch_count,
             "feature_dim": feature_spec.feature_dim,
+            "layer_fusion": str(config["inference"].get("layer_fusion", "mean")),
+            "upsample_mode": str(config["inference"].get("upsample_mode", "bilinear")),
             "hidden_state_definition": (
                 "hidden_states[0] is embedding output; hidden_states[k] is output "
                 "after encoder block k; CLS is removed"
@@ -726,6 +845,8 @@ def run_experiment(
                 int(value) for value in config["model"]["active_layers"]
             ],
             "spatial_mode": str(config["retrieval"]["spatial_mode"]),
+            "layer_fusion": str(config["inference"].get("layer_fusion", "mean")),
+            "upsample_mode": str(config["inference"].get("upsample_mode", "bilinear")),
             "config_fingerprint": config_fingerprint(config),
         },
         completion_path,

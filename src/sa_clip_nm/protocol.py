@@ -96,6 +96,39 @@ def metric_protocol(
             ),
         },
     }
+    inference_config = config["inference"]
+    localization_inference_keys = {
+        "layer_fusion",
+        "layer_fusion_epsilon",
+        "layer_weights",
+        "upsample_mode",
+    }
+    if any(key in inference_config for key in localization_inference_keys):
+        protocol["inference"].update(
+            {
+                "layer_fusion": str(
+                    inference_config.get("layer_fusion", "mean")
+                ),
+                "layer_fusion_epsilon": float(
+                    inference_config.get("layer_fusion_epsilon", 1.0e-6)
+                ),
+                "layer_weights": inference_config.get("layer_weights"),
+                "upsample_mode": str(
+                    inference_config.get("upsample_mode", "bilinear")
+                ),
+            }
+        )
+    evaluation_config = config["evaluation"]
+    if "small_max_fraction" in evaluation_config:
+        protocol["evaluation"]["small_max_fraction"] = float(
+            evaluation_config["small_max_fraction"]
+        )
+    if "medium_max_fraction" in evaluation_config:
+        protocol["evaluation"]["medium_max_fraction"] = float(
+            evaluation_config["medium_max_fraction"]
+        )
+    if "localization" in config:
+        protocol["localization"] = config["localization"]
     if include_threshold_method:
         protocol["calibration"]["pixel_threshold_method"] = str(
             config["calibration"]["pixel_threshold_method"]

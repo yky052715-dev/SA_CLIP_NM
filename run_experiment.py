@@ -54,6 +54,24 @@ def parse_args() -> argparse.Namespace:
         type=int,
         help="Override calibration.threshold_split_seed",
     )
+    parser.add_argument(
+        "--layer-fusion",
+        choices=["mean", "geometric", "minimum", "weighted_mean"],
+        help="Override inference.layer_fusion",
+    )
+    parser.add_argument(
+        "--layer-fusion-epsilon",
+        type=float,
+        help="Override inference.layer_fusion_epsilon",
+    )
+    parser.add_argument(
+        "--upsample-mode",
+        choices=["bilinear", "nearest"],
+        help="Override inference.upsample_mode",
+    )
+    parser.add_argument(
+        "--diagnostics", action="store_true", help="Enable P0 diagnostic outputs"
+    )
     args = parser.parse_args()
     return args
 
@@ -88,9 +106,15 @@ def main() -> None:
     if args.pixel_topk_fraction is not None:
         config["calibration"]["pixel_topk_fraction"] = args.pixel_topk_fraction
     if args.threshold_split_seed is not None:
-        config["calibration"]["threshold_split_seed"] = (
-            args.threshold_split_seed
-        )
+        config["calibration"]["threshold_split_seed"] = args.threshold_split_seed
+    if args.layer_fusion:
+        config["inference"]["layer_fusion"] = args.layer_fusion
+    if args.layer_fusion_epsilon is not None:
+        config["inference"]["layer_fusion_epsilon"] = args.layer_fusion_epsilon
+    if args.upsample_mode:
+        config["inference"]["upsample_mode"] = args.upsample_mode
+    if args.diagnostics:
+        config.setdefault("diagnostics", {})["enabled"] = True
     set_seed(int(config["experiment"]["seed"]))
     run_experiment(config, args.device)
 
