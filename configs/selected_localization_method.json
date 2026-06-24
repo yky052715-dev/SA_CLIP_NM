@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "status": "locked",
+  "method_id": "tiled_mean_position_rho010_mem01",
+  "selected_on": "mvtec_dev5",
+  "selected_output": "outputs/localization_refinement/dev5_p3/P30_position_rho010_mem01",
+  "development_categories": [
+    "bottle",
+    "metal_nut",
+    "grid",
+    "leather",
+    "screw"
+  ],
+  "validation_categories": [
+    "cable",
+    "capsule",
+    "carpet",
+    "hazelnut",
+    "pill",
+    "tile",
+    "toothbrush",
+    "transistor",
+    "wood",
+    "zipper"
+  ],
+  "parameters": {
+    "active_layers": [3, 6],
+    "spatial_mode": "none",
+    "global_memory_ratio": 0.1,
+    "layer_fusion": "mean",
+    "layer_fusion_epsilon": 1e-06,
+    "upsample_mode": "bilinear",
+    "localization_mode": "tiled",
+    "canvas_size": 448,
+    "window_size": 224,
+    "stride": 112,
+    "window_merge": "hann",
+    "min_window_weight": 0.05,
+    "local_memory_ratio": 0.01,
+    "local_memory_max_entries": 50000,
+    "image_score_merge": "max",
+    "position_rho": 0.1,
+    "position_quantile": 0.95,
+    "position_clamp_min_zero": true,
+    "pixel_threshold_method": "image_max_quantile",
+    "pixel_image_quantile": 0.95,
+    "threshold_split_seed": 42,
+    "model_seed": 42
+  },
+  "dev5_reference_metrics": {
+    "pixel_AUROC": 0.9861933028644888,
+    "pixel_F1_calibrated": 0.5468794654637852,
+    "localization_overseg_anomaly_macro": 1.178465443007518,
+    "localization_recall_anomaly_macro": 0.7001536073621695,
+    "localization_small_defect_f1_macro": 0.443573627692384,
+    "localization_small_defect_recall_macro": 0.804234900840497,
+    "localization_test_normal_image_positive_rate": 0.13464127336078555,
+    "inference_ms_per_image": 45.01991354690055
+  },
+  "selection_note": "Locked after Dev5. Validation10 must not change method parameters."
+}
