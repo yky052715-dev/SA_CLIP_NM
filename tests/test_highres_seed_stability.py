@@ -12,9 +12,17 @@ from summarize_highres_seed_stability import (
 )
 
 
-def _category(name, f1, overseg, recall=0.75, normal_fp=0.10):
+def _category(
+    name,
+    f1,
+    overseg,
+    recall=0.75,
+    normal_fp=0.10,
+    auroc=0.98,
+):
     return {
         "category": name,
+        "pixel_AUROC": auroc,
         "pixel_F1_calibrated": f1,
         "localization_overseg_anomaly_macro": overseg,
         "localization_recall_anomaly_macro": recall,
