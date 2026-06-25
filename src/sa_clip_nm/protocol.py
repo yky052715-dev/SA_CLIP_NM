@@ -192,6 +192,15 @@ def metric_protocol(
         )
     if "localization" in config:
         protocol["localization"] = config["localization"]
+    if "postprocess" in config:
+        protocol["postprocess"] = {
+            "min_component_area_fraction": float(
+                config["postprocess"].get(
+                    "min_component_area_fraction",
+                    0.0,
+                )
+            ),
+        }
     if include_threshold_method:
         protocol["calibration"]["pixel_threshold_method"] = str(
             config["calibration"]["pixel_threshold_method"]

@@ -21,12 +21,43 @@ def defect_size_group(
     return "large"
 
 
+def filter_small_components(
+    prediction: np.ndarray,
+    min_component_area_pixels: int,
+) -> np.ndarray:
+    prediction_array = np.asarray(prediction).astype(bool)
+    if prediction_array.ndim != 2:
+        raise ValueError("prediction must be two-dimensional")
+    if min_component_area_pixels <= 1:
+        return prediction_array.copy()
+    labels, component_count = connected_component_label(prediction_array)
+    filtered = np.zeros_like(prediction_array, dtype=bool)
+    for component_id in range(1, int(component_count) + 1):
+        component = labels == component_id
+        if int(component.sum()) >= int(min_component_area_pixels):
+            filtered |= component
+    return filtered
+
+
+def prediction_from_anomaly_map(
+    anomaly_map: np.ndarray,
+    threshold: float,
+    min_component_area_pixels: int = 0,
+) -> np.ndarray:
+    anomaly_array = np.asarray(anomaly_map, dtype=np.float64)
+    if anomaly_array.ndim != 2:
+        raise ValueError("anomaly_map must be two-dimensional")
+    prediction = anomaly_array >= float(threshold)
+    return filter_small_components(prediction, min_component_area_pixels)
+
+
 def evaluate_localization_image(
     ground_truth: np.ndarray,
     anomaly_map: np.ndarray,
     threshold: float,
     small_max_fraction: float = 0.005,
     medium_max_fraction: float = 0.02,
+    min_component_area_pixels: int = 0,
 ) -> dict[str, float | int | str | None]:
     ground_truth_array = np.asarray(ground_truth).astype(bool)
     anomaly_array = np.asarray(anomaly_map, dtype=np.float64)
@@ -35,7 +66,11 @@ def evaluate_localization_image(
     if ground_truth_array.shape != anomaly_array.shape:
         raise ValueError("ground_truth and anomaly_map must have the same shape")
 
-    prediction = anomaly_array >= float(threshold)
+    prediction = prediction_from_anomaly_map(
+        anomaly_array,
+        threshold=float(threshold),
+        min_component_area_pixels=min_component_area_pixels,
+    )
     total_pixels = int(ground_truth_array.size)
     ground_truth_area = int(ground_truth_array.sum())
     prediction_area = int(prediction.sum())

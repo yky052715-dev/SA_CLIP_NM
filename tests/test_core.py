@@ -214,3 +214,19 @@ def test_adaptive_pixel_threshold_falls_back_to_most_conservative_candidate() ->
 
     assert np.isclose(threshold, 2.5)
     assert np.isclose(selected_quantile, 0.5)
+
+
+def test_binary_metrics_can_use_postprocessed_calibrated_predictions() -> None:
+    labels = np.array([0, 1, 1], dtype=np.uint8)
+    scores = np.array([0.9, 0.8, 0.1], dtype=np.float64)
+    metrics = evaluate_binary_scores(
+        labels,
+        scores,
+        calibrated_threshold=0.5,
+        compute_oracle=True,
+        calibrated_predictions=np.array([0, 1, 0], dtype=np.uint8),
+    )
+
+    assert np.isclose(metrics.calibrated_f1, 2.0 / 3.0)
+    assert np.isclose(metrics.calibrated_iou, 0.5)
+    assert metrics.oracle_f1 >= metrics.calibrated_f1

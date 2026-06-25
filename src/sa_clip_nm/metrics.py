@@ -49,10 +49,16 @@ def evaluate_binary_scores(
     scores: np.ndarray,
     calibrated_threshold: float,
     compute_oracle: bool,
+    calibrated_predictions: np.ndarray | None = None,
 ) -> BinaryMetrics:
     labels = np.asarray(labels, dtype=np.uint8).reshape(-1)
     scores = np.asarray(scores, dtype=np.float64).reshape(-1)
-    predictions = scores >= calibrated_threshold
+    if calibrated_predictions is None:
+        predictions = scores >= calibrated_threshold
+    else:
+        predictions = np.asarray(calibrated_predictions).astype(bool).reshape(-1)
+        if predictions.shape != labels.shape:
+            raise ValueError("calibrated_predictions must match labels shape")
     calibrated_f1 = float(f1_score(labels, predictions, zero_division=0))
     calibrated_iou = binary_iou(labels, predictions)
     if compute_oracle:

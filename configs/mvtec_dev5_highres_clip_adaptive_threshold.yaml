@@ -76,6 +76,9 @@ diagnostics:
 localization:
   enabled: false
   mode: global
+
+postprocess:
+  min_component_area_fraction: 0.0
 evaluation:
   compute_oracle_f1: true
   save_predictions: false

@@ -7,6 +7,8 @@ import torch
 from sa_clip_nm.calibration import LayerCalibration
 from sa_clip_nm.localization_metrics import (
     evaluate_localization_image,
+    filter_small_components,
+    prediction_from_anomaly_map,
     summarize_localization_rows,
 )
 from sa_clip_nm.map_refinement import (
@@ -156,3 +158,42 @@ def test_localization_summary_is_macro_averaged() -> None:
     assert summary["small_defect_images"] == 1
     assert summary["test_normal_pixel_positive_rate"] == 0.0
     assert summary["test_normal_image_positive_rate"] == 0.0
+
+
+def test_min_component_postprocess_removes_isolated_prediction() -> None:
+    prediction = np.array(
+        [
+            [1, 0, 0, 0],
+            [0, 0, 1, 1],
+            [0, 0, 1, 1],
+            [0, 0, 0, 0],
+        ],
+        dtype=np.uint8,
+    )
+    filtered = filter_small_components(prediction, min_component_area_pixels=2)
+    assert filtered.sum() == 4
+    assert not bool(filtered[0, 0])
+    assert bool(filtered[1, 2])
+
+
+def test_localization_metrics_use_postprocessed_prediction() -> None:
+    ground_truth = np.zeros((4, 4), dtype=np.uint8)
+    anomaly_map = np.zeros((4, 4), dtype=np.float32)
+    anomaly_map[0, 0] = 10.0
+    anomaly_map[2:4, 2:4] = 10.0
+
+    prediction = prediction_from_anomaly_map(
+        anomaly_map,
+        threshold=1.0,
+        min_component_area_pixels=2,
+    )
+    metrics = evaluate_localization_image(
+        ground_truth,
+        anomaly_map,
+        threshold=1.0,
+        min_component_area_pixels=2,
+    )
+
+    assert prediction.sum() == 4
+    assert metrics["prediction_area"] == 4
+    assert metrics["connected_component_count"] == 1

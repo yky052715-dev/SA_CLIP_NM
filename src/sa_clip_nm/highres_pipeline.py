@@ -30,6 +30,7 @@ from .highres_data import (
 from .localization_diagnostics import save_localization_diagnostics
 from .localization_metrics import (
     evaluate_localization_image,
+    prediction_from_anomaly_map,
     summarize_localization_rows,
 )
 from .map_refinement import upsample_anomaly_maps
@@ -108,9 +109,19 @@ def evaluate_highres_category(
     image_scores_all: list[float] = []
     pixel_labels: list[np.ndarray] = []
     pixel_scores: list[np.ndarray] = []
+    pixel_predictions: list[np.ndarray] = []
     localization_rows: list[dict[str, object]] = []
     samples: list[dict[str, object]] = []
     inference_seconds = 0.0
+    postprocess_config = config.get("postprocess", {})
+    min_component_area_fraction = float(
+        postprocess_config.get("min_component_area_fraction", 0.0)
+    )
+    if min_component_area_fraction < 0.0:
+        raise ValueError("postprocess.min_component_area_fraction must be non-negative")
+    min_component_area_pixels = int(
+        round(min_component_area_fraction * (_evaluation_size(config) ** 2))
+    )
     if torch.cuda.is_available() and torch.device(device).type == "cuda":
         torch.cuda.reset_peak_memory_stats(torch.device(device))
 
@@ -154,9 +165,16 @@ def evaluate_highres_category(
         pixel_labels.extend([mask.reshape(-1) for mask in masks])
         pixel_scores.extend([score.numpy().reshape(-1) for score in maps])
         for index in range(maps.shape[0]):
+            anomaly_map = maps[index].numpy()
+            prediction = prediction_from_anomaly_map(
+                anomaly_map,
+                threshold=calibration.pixel_threshold,
+                min_component_area_pixels=min_component_area_pixels,
+            )
+            pixel_predictions.append(prediction.reshape(-1))
             row = evaluate_localization_image(
                 ground_truth=masks[index],
-                anomaly_map=maps[index].numpy(),
+                anomaly_map=anomaly_map,
                 threshold=calibration.pixel_threshold,
                 small_max_fraction=float(
                     config["evaluation"].get("small_max_fraction", 0.005)
@@ -164,6 +182,7 @@ def evaluate_highres_category(
                 medium_max_fraction=float(
                     config["evaluation"].get("medium_max_fraction", 0.02)
                 ),
+                min_component_area_pixels=min_component_area_pixels,
             )
             localization_rows.append(
                 {
@@ -182,7 +201,8 @@ def evaluate_highres_category(
                         "defect_type": batch["defect_type"][index],
                         "image": batch["display_image"][index],
                         "mask": masks[index],
-                        "map": maps[index].numpy(),
+                        "map": anomaly_map,
+                        "prediction": prediction,
                         "image_score": float(batch_image_scores[index].item()),
                         "layer_patch_maps": {
                             layer: values[index].numpy()
@@ -205,6 +225,7 @@ def evaluate_highres_category(
         np.concatenate(pixel_scores),
         calibrated_threshold=calibration.pixel_threshold,
         compute_oracle=bool(config["evaluation"]["compute_oracle_f1"]),
+        calibrated_predictions=np.concatenate(pixel_predictions),
     )
     localization_summary = summarize_localization_rows(localization_rows)
     save_json(localization_summary, category_dir / "localization_metrics.json")
@@ -239,6 +260,8 @@ def evaluate_highres_category(
         **flatten_metrics("pixel", pixel_metrics),
         "image_threshold_calibrated": calibration.image_threshold,
         "pixel_threshold_calibrated": calibration.pixel_threshold,
+        "postprocess_min_component_area_fraction": min_component_area_fraction,
+        "postprocess_min_component_area_pixels": min_component_area_pixels,
         "pixel_threshold_method": calibration.pixel_threshold_method,
         "pixel_image_quantile_calibrated": calibration.pixel_image_quantile,
         "adaptive_selected_pixel_image_quantile": (
@@ -276,7 +299,7 @@ def evaluate_highres_category(
                 image=np.asarray(sample["image"]),
                 ground_truth=np.asarray(sample["mask"]),
                 anomaly_map=anomaly_map,
-                prediction=anomaly_map >= calibration.pixel_threshold,
+                prediction=np.asarray(sample["prediction"]),
                 output_path=category_dir
                 / "visualizations"
                 / f"{index:03d}_{sample['defect_type']}_{stem}.png",
@@ -304,7 +327,7 @@ def evaluate_highres_category(
                 ground_truth=np.asarray(sample["mask"]),
                 anomaly_map=anomaly_map,
                 nearest_map=nearest_map,
-                prediction=anomaly_map >= calibration.pixel_threshold,
+                prediction=np.asarray(sample["prediction"]),
                 layer_patch_maps=sample["layer_patch_maps"],
                 fused_patch_map=np.asarray(sample["fused_patch_map"]),
                 threshold=calibration.pixel_threshold,
