@@ -1,0 +1,71 @@
+{
+  "schema_version": 1,
+  "status": "locked",
+  "method_id": "highres_clip336_adaptive_area_component",
+  "selected_on": "mvtec_dev5",
+  "selected_output": "outputs/localization_refinement/highres_adaptive_area_component_stability",
+  "development_categories": [
+    "bottle",
+    "metal_nut",
+    "grid",
+    "leather",
+    "screw"
+  ],
+  "parameters": {
+    "checkpoint": "openai/clip-vit-base-patch16",
+    "input_image_size": 336,
+    "evaluation_size": 448,
+    "active_layers": [
+      3,
+      6
+    ],
+    "token_norm": "none",
+    "spatial_mode": "none",
+    "global_memory_ratio": 0.0444444444,
+    "layer_fusion": "mean",
+    "layer_fusion_epsilon": 1e-06,
+    "layer_weights": {
+      "3": 0.5,
+      "6": 0.5
+    },
+    "upsample_mode": "bilinear",
+    "gaussian_sigma": 0.0,
+    "image_score": "topk_mean",
+    "image_topk_fraction": 0.01,
+    "threshold_fit_fraction": 0.8,
+    "pixel_threshold_method": "adaptive_area_image_max_quantile",
+    "pixel_quantile": 0.995,
+    "pixel_image_quantile": 0.95,
+    "pixel_topk_fraction": 0.01,
+    "adaptive_pixel_image_quantiles": [
+      0.875,
+      0.9,
+      0.925,
+      0.95
+    ],
+    "adaptive_max_normal_image_positive_rate": null,
+    "adaptive_max_normal_pixel_positive_rate": null,
+    "adaptive_max_normal_positive_area_p95_fraction": 0.001,
+    "adaptive_max_normal_positive_area_max_fraction": null,
+    "postprocess_min_component_area_fraction": 0.0005,
+    "threshold_split_seed": 42,
+    "model_seed": 42
+  },
+  "dev5_three_seed_reference": {
+    "pixel_AUROC_delta_mean": 0.004428,
+    "pixel_F1_calibrated_delta_mean": 0.045822,
+    "pixel_F1_oracle_delta_mean": 0.055464,
+    "localization_overseg_anomaly_macro_delta_mean": -1.513653,
+    "localization_recall_anomaly_macro_delta_mean": -0.003258,
+    "localization_small_defect_f1_macro_delta_mean": 0.103015,
+    "localization_small_defect_recall_macro_delta_mean": 0.035026,
+    "localization_test_normal_image_positive_rate_delta_mean": -0.057131,
+    "all_seeds_pass": true
+  },
+  "known_dev5_risks": [
+    "metal_nut calibrated F1 remains below H0 despite oracle F1 improvement",
+    "grid has structured normal texture false positives",
+    "leather oversegmentation remains high in absolute value despite improvement"
+  ],
+  "selection_note": "Locked after Dev5 three-seed stability and per-case inspection. External validation must not change method parameters."
+}
