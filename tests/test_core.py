@@ -5,6 +5,7 @@ import torch
 
 from sa_clip_nm.backbone import make_patch_coordinates
 from sa_clip_nm.calibration import (
+    adaptive_pixel_threshold_from_maps,
     calibrate_scores,
     compute_layer_tau,
     estimate_spatial_reliability,
@@ -156,3 +157,60 @@ def test_normal_only_pixel_threshold_strategies() -> None:
     diagnostics = normal_threshold_diagnostics(maps, threshold=4.0)
     assert np.isclose(diagnostics["normal_pixel_positive_rate"], 0.25)
     assert np.isclose(diagnostics["normal_image_positive_rate"], 0.5)
+
+
+def test_adaptive_pixel_threshold_selects_first_normal_safe_quantile() -> None:
+    threshold_fit_maps = torch.tensor(
+        [
+            [[1.0]],
+            [[2.0]],
+            [[3.0]],
+            [[4.0]],
+        ]
+    )
+    normal_validation_maps = torch.tensor([[[2.0]], [[5.0]]])
+
+    threshold, selected_quantile, candidates = adaptive_pixel_threshold_from_maps(
+        threshold_fit_maps=threshold_fit_maps,
+        normal_validation_maps=normal_validation_maps,
+        method="image_max_quantile",
+        pixel_quantile=0.5,
+        image_quantiles=[0.0, 0.5, 1.0],
+        topk_fraction=1.0,
+        max_normal_image_positive_rate=0.5,
+    )
+
+    assert np.isclose(threshold, 2.5)
+    assert np.isclose(selected_quantile, 0.5)
+    assert [item["pixel_image_quantile"] for item in candidates] == [
+        0.0,
+        0.5,
+        1.0,
+    ]
+    assert np.isclose(candidates[0]["normal_image_positive_rate"], 1.0)
+    assert np.isclose(candidates[1]["normal_image_positive_rate"], 0.5)
+
+
+def test_adaptive_pixel_threshold_falls_back_to_most_conservative_candidate() -> None:
+    threshold_fit_maps = torch.tensor(
+        [
+            [[1.0]],
+            [[2.0]],
+            [[3.0]],
+            [[4.0]],
+        ]
+    )
+    normal_validation_maps = torch.tensor([[[2.0]], [[5.0]]])
+
+    threshold, selected_quantile, _ = adaptive_pixel_threshold_from_maps(
+        threshold_fit_maps=threshold_fit_maps,
+        normal_validation_maps=normal_validation_maps,
+        method="image_max_quantile",
+        pixel_quantile=0.5,
+        image_quantiles=[0.0, 0.5],
+        topk_fraction=1.0,
+        max_normal_image_positive_rate=0.0,
+    )
+
+    assert np.isclose(threshold, 2.5)
+    assert np.isclose(selected_quantile, 0.5)

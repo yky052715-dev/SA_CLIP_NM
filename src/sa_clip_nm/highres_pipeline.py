@@ -240,6 +240,13 @@ def evaluate_highres_category(
         "image_threshold_calibrated": calibration.image_threshold,
         "pixel_threshold_calibrated": calibration.pixel_threshold,
         "pixel_threshold_method": calibration.pixel_threshold_method,
+        "pixel_image_quantile_calibrated": calibration.pixel_image_quantile,
+        "adaptive_selected_pixel_image_quantile": (
+            calibration.adaptive_selected_pixel_image_quantile
+        ),
+        "adaptive_max_normal_image_positive_rate": (
+            calibration.adaptive_max_normal_image_positive_rate
+        ),
         "normal_pixel_positive_rate": calibration.normal_pixel_positive_rate,
         "normal_image_positive_rate": calibration.normal_image_positive_rate,
         "threshold_fit_images": calibration.threshold_fit_images,

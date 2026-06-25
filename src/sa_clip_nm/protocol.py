@@ -7,7 +7,7 @@ from typing import Any
 
 def threshold_parameters(config: dict[str, Any]) -> dict[str, Any]:
     calibration = config["calibration"]
-    return {
+    payload = {
         "pixel_threshold_method": str(
             calibration["pixel_threshold_method"]
         ),
@@ -19,6 +19,38 @@ def threshold_parameters(config: dict[str, Any]) -> dict[str, Any]:
             calibration["pixel_topk_fraction"]
         ),
     }
+    if str(calibration["pixel_threshold_method"]).startswith("adaptive_"):
+        payload.update(
+            {
+                "adaptive_pixel_image_quantiles": [
+                    float(value)
+                    for value in calibration.get(
+                        "adaptive_pixel_image_quantiles",
+                        [0.90, 0.925, 0.95],
+                    )
+                ],
+                "adaptive_max_normal_image_positive_rate": float(
+                    calibration.get(
+                        "adaptive_max_normal_image_positive_rate",
+                        0.15,
+                    )
+                ),
+                "adaptive_max_normal_pixel_positive_rate": (
+                    None
+                    if calibration.get(
+                        "adaptive_max_normal_pixel_positive_rate",
+                        None,
+                    )
+                    is None
+                    else float(
+                        calibration[
+                            "adaptive_max_normal_pixel_positive_rate"
+                        ]
+                    )
+                ),
+            }
+        )
+    return payload
 
 
 def metric_protocol(
@@ -96,6 +128,37 @@ def metric_protocol(
             ),
         },
     }
+    if str(config["calibration"]["pixel_threshold_method"]).startswith("adaptive_"):
+        protocol["calibration"].update(
+            {
+                "adaptive_pixel_image_quantiles": [
+                    float(value)
+                    for value in config["calibration"].get(
+                        "adaptive_pixel_image_quantiles",
+                        [0.90, 0.925, 0.95],
+                    )
+                ],
+                "adaptive_max_normal_image_positive_rate": float(
+                    config["calibration"].get(
+                        "adaptive_max_normal_image_positive_rate",
+                        0.15,
+                    )
+                ),
+                "adaptive_max_normal_pixel_positive_rate": (
+                    None
+                    if config["calibration"].get(
+                        "adaptive_max_normal_pixel_positive_rate",
+                        None,
+                    )
+                    is None
+                    else float(
+                        config["calibration"][
+                            "adaptive_max_normal_pixel_positive_rate"
+                        ]
+                    )
+                ),
+            }
+        )
     inference_config = config["inference"]
     localization_inference_keys = {
         "layer_fusion",

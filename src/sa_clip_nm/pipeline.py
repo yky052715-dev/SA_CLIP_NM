@@ -18,6 +18,7 @@ from .backbone import CLIPVisionFeatureExtractor, make_patch_coordinates
 from .calibration import (
     CategoryCalibration,
     LayerCalibration,
+    adaptive_pixel_threshold_from_maps,
     calibrate_scores,
     compute_layer_tau,
     estimate_spatial_reliability,
@@ -415,13 +416,64 @@ def calibrate_category(
     pixel_topk_fraction = float(
         config["calibration"].get("pixel_topk_fraction", 0.01)
     )
-    pixel_threshold = pixel_threshold_from_maps(
-        threshold_fit_maps,
-        method=threshold_method,
-        pixel_quantile=pixel_quantile,
-        image_quantile=pixel_image_quantile,
-        topk_fraction=pixel_topk_fraction,
-    )
+    adaptive_quantiles = None
+    adaptive_selected_quantile = None
+    adaptive_max_image_fp = None
+    adaptive_max_pixel_fp = None
+    adaptive_candidates = None
+    if threshold_method.startswith("adaptive_"):
+        adaptive_base_methods = {
+            "adaptive_image_max_quantile": "image_max_quantile",
+            "adaptive_image_topk_quantile": "image_topk_quantile",
+        }
+        if threshold_method not in adaptive_base_methods:
+            raise ValueError(
+                "adaptive pixel threshold method must be one of: "
+                "adaptive_image_max_quantile, adaptive_image_topk_quantile"
+            )
+        adaptive_quantiles = [
+            float(value)
+            for value in config["calibration"].get(
+                "adaptive_pixel_image_quantiles",
+                [0.90, 0.925, 0.95],
+            )
+        ]
+        adaptive_max_image_fp = float(
+            config["calibration"].get(
+                "adaptive_max_normal_image_positive_rate",
+                0.15,
+            )
+        )
+        raw_max_pixel_fp = config["calibration"].get(
+            "adaptive_max_normal_pixel_positive_rate",
+            None,
+        )
+        adaptive_max_pixel_fp = (
+            None if raw_max_pixel_fp is None else float(raw_max_pixel_fp)
+        )
+        (
+            pixel_threshold,
+            adaptive_selected_quantile,
+            adaptive_candidates,
+        ) = adaptive_pixel_threshold_from_maps(
+            threshold_fit_maps=threshold_fit_maps,
+            normal_validation_maps=normal_validation_maps,
+            method=adaptive_base_methods[threshold_method],
+            pixel_quantile=pixel_quantile,
+            image_quantiles=adaptive_quantiles,
+            topk_fraction=pixel_topk_fraction,
+            max_normal_image_positive_rate=adaptive_max_image_fp,
+            max_normal_pixel_positive_rate=adaptive_max_pixel_fp,
+        )
+        pixel_image_quantile = adaptive_selected_quantile
+    else:
+        pixel_threshold = pixel_threshold_from_maps(
+            threshold_fit_maps,
+            method=threshold_method,
+            pixel_quantile=pixel_quantile,
+            image_quantile=pixel_image_quantile,
+            topk_fraction=pixel_topk_fraction,
+        )
     threshold_diagnostics = normal_threshold_diagnostics(
         normal_validation_maps,
         pixel_threshold,
@@ -451,6 +503,11 @@ def calibrate_category(
         normal_validation_images=len(payload["normal_validation_indices"]),
         normalization_fit_images=len(payload["paths"]),
         normal_diagnostic_mode="held_out_from_threshold_fit",
+        adaptive_pixel_image_quantiles=adaptive_quantiles,
+        adaptive_selected_pixel_image_quantile=adaptive_selected_quantile,
+        adaptive_max_normal_image_positive_rate=adaptive_max_image_fp,
+        adaptive_max_normal_pixel_positive_rate=adaptive_max_pixel_fp,
+        adaptive_threshold_candidates=adaptive_candidates,
     )
     calibration.save(artifact_dir / "calibration.json")
     return calibration

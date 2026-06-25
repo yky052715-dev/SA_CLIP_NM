@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Sequence
 
 import numpy as np
 import torch
@@ -38,6 +38,11 @@ class CategoryCalibration:
     normal_validation_images: int
     normalization_fit_images: int
     normal_diagnostic_mode: str
+    adaptive_pixel_image_quantiles: list[float] | None = None
+    adaptive_selected_pixel_image_quantile: float | None = None
+    adaptive_max_normal_image_positive_rate: float | None = None
+    adaptive_max_normal_pixel_positive_rate: float | None = None
+    adaptive_threshold_candidates: list[dict[str, float]] | None = None
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -60,6 +65,19 @@ class CategoryCalibration:
             "normal_validation_images": self.normal_validation_images,
             "normalization_fit_images": self.normalization_fit_images,
             "normal_diagnostic_mode": self.normal_diagnostic_mode,
+            "adaptive_pixel_image_quantiles": self.adaptive_pixel_image_quantiles,
+            "adaptive_selected_pixel_image_quantile": (
+                self.adaptive_selected_pixel_image_quantile
+            ),
+            "adaptive_max_normal_image_positive_rate": (
+                self.adaptive_max_normal_image_positive_rate
+            ),
+            "adaptive_max_normal_pixel_positive_rate": (
+                self.adaptive_max_normal_pixel_positive_rate
+            ),
+            "adaptive_threshold_candidates": (
+                self.adaptive_threshold_candidates
+            ),
         }
 
     def save(self, path: str | Path) -> None:
@@ -219,6 +237,78 @@ def pixel_threshold_from_maps(
             "global_quantile, image_max_quantile, image_topk_quantile"
         )
     return quantile_threshold(values.cpu().numpy(), quantile)
+
+
+def adaptive_pixel_threshold_from_maps(
+    threshold_fit_maps: torch.Tensor,
+    normal_validation_maps: torch.Tensor,
+    method: str,
+    pixel_quantile: float,
+    image_quantiles: Sequence[float],
+    topk_fraction: float,
+    max_normal_image_positive_rate: float,
+    max_normal_pixel_positive_rate: float | None = None,
+) -> tuple[float, float, list[dict[str, float]]]:
+    """Select a normal-only pixel threshold from candidate image quantiles.
+
+    Candidates are evaluated on held-out normal calibration maps only. The
+    first candidate whose normal image-level and optional pixel-level false
+    positive rates are within bounds is selected. Candidates should therefore
+    be passed from permissive to conservative, e.g. [0.90, 0.925, 0.95].
+    """
+    if not image_quantiles:
+        raise ValueError("image_quantiles must not be empty")
+    if not 0.0 <= max_normal_image_positive_rate <= 1.0:
+        raise ValueError("max_normal_image_positive_rate must be in [0, 1]")
+    if max_normal_pixel_positive_rate is not None and not (
+        0.0 <= max_normal_pixel_positive_rate <= 1.0
+    ):
+        raise ValueError("max_normal_pixel_positive_rate must be in [0, 1]")
+
+    candidates: list[dict[str, float]] = []
+    selected: dict[str, float] | None = None
+    for quantile in image_quantiles:
+        threshold = pixel_threshold_from_maps(
+            threshold_fit_maps,
+            method=method,
+            pixel_quantile=pixel_quantile,
+            image_quantile=float(quantile),
+            topk_fraction=topk_fraction,
+        )
+        diagnostics = normal_threshold_diagnostics(
+            normal_validation_maps,
+            threshold,
+        )
+        candidate = {
+            "pixel_image_quantile": float(quantile),
+            "pixel_threshold": float(threshold),
+            "normal_pixel_positive_rate": float(
+                diagnostics["normal_pixel_positive_rate"]
+            ),
+            "normal_image_positive_rate": float(
+                diagnostics["normal_image_positive_rate"]
+            ),
+        }
+        candidates.append(candidate)
+        pixel_ok = (
+            max_normal_pixel_positive_rate is None
+            or candidate["normal_pixel_positive_rate"]
+            <= max_normal_pixel_positive_rate
+        )
+        image_ok = (
+            candidate["normal_image_positive_rate"]
+            <= max_normal_image_positive_rate
+        )
+        if selected is None and image_ok and pixel_ok:
+            selected = candidate
+
+    if selected is None:
+        selected = candidates[-1]
+    return (
+        float(selected["pixel_threshold"]),
+        float(selected["pixel_image_quantile"]),
+        candidates,
+    )
 
 
 def normal_threshold_diagnostics(
