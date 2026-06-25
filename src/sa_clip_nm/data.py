@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import csv
 from pathlib import Path
 from typing import Iterable
 
@@ -71,6 +72,108 @@ def build_mvtec_records(root: str | Path, category: str) -> tuple[list[ImageReco
     if not test_records:
         raise RuntimeError(f"No test images found in {test_root}")
     return train_records, test_records
+
+
+def build_visa_records(
+    root: str | Path,
+    category: str,
+    normal_train_fraction: float = 0.5,
+    split_seed: int = 42,
+) -> tuple[list[ImageRecord], list[ImageRecord]]:
+    """Build VisA records from category/image_anno.csv without train/test leakage.
+
+    The VisA layout used here lists all normal and anomaly images in one CSV and
+    does not provide an explicit train/test split. We therefore split normal
+    images deterministically: a configurable fraction is used for unsupervised
+    memory/calibration, while the remaining normal images plus all anomaly
+    images are used for evaluation.
+    """
+    if not 0.0 < normal_train_fraction < 1.0:
+        raise ValueError("normal_train_fraction must be between 0 and 1")
+    root_path = Path(root)
+    csv_path = root_path / category / "image_anno.csv"
+    if not csv_path.is_file():
+        raise FileNotFoundError(f"Missing VisA annotation CSV: {csv_path}")
+
+    normal_records: list[ImageRecord] = []
+    anomaly_records: list[ImageRecord] = []
+    with csv_path.open("r", encoding="utf-8", errors="ignore", newline="") as handle:
+        reader = csv.DictReader(handle)
+        required = {"image", "label", "mask"}
+        missing = required - set(reader.fieldnames or [])
+        if missing:
+            raise ValueError(f"VisA CSV {csv_path} is missing columns: {sorted(missing)}")
+        for row in reader:
+            image_path = root_path / str(row["image"])
+            label_text = str(row["label"]).strip().lower()
+            mask_text = str(row.get("mask", "")).strip()
+            if not image_path.is_file():
+                raise FileNotFoundError(f"Missing VisA image: {image_path}")
+            if label_text == "normal":
+                normal_records.append(
+                    ImageRecord(path=image_path, label=0, defect_type="normal")
+                )
+            else:
+                if mask_text:
+                    mask_path = root_path / mask_text
+                else:
+                    mask_path = (
+                        root_path
+                        / category
+                        / "Data"
+                        / "Masks"
+                        / "Anomaly"
+                        / f"{image_path.stem}.png"
+                    )
+                if not mask_path.is_file():
+                    raise FileNotFoundError(f"Missing VisA mask for {image_path}: {mask_path}")
+                anomaly_records.append(
+                    ImageRecord(
+                        path=image_path,
+                        label=1,
+                        defect_type=label_text or "anomaly",
+                        mask_path=mask_path,
+                    )
+                )
+
+    if len(normal_records) < 2:
+        raise RuntimeError(f"At least two normal VisA images are required for {category}")
+    if not anomaly_records:
+        raise RuntimeError(f"No anomaly VisA images found for {category}")
+
+    generator = np.random.default_rng(int(split_seed))
+    indices = generator.permutation(len(normal_records))
+    train_count = int(round(len(normal_records) * normal_train_fraction))
+    train_count = min(max(1, train_count), len(normal_records) - 1)
+    train_indices = set(indices[:train_count].tolist())
+    train_records = [
+        record for index, record in enumerate(normal_records) if index in train_indices
+    ]
+    test_normal_records = [
+        record for index, record in enumerate(normal_records) if index not in train_indices
+    ]
+    test_records = test_normal_records + anomaly_records
+    return train_records, test_records
+
+
+def build_records(
+    root: str | Path,
+    category: str,
+    data_config: dict[str, object],
+) -> tuple[list[ImageRecord], list[ImageRecord]]:
+    dataset = str(data_config.get("dataset", "mvtec")).lower()
+    if dataset == "mvtec":
+        return build_mvtec_records(root, category)
+    if dataset == "visa":
+        return build_visa_records(
+            root,
+            category,
+            normal_train_fraction=float(
+                data_config.get("visa_normal_train_fraction", 0.5)
+            ),
+            split_seed=int(data_config.get("visa_split_seed", 42)),
+        )
+    raise ValueError(f"Unsupported dataset: {dataset}")
 
 
 def split_normal_records(

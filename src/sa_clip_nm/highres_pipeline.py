@@ -18,7 +18,7 @@ from .calibration import (
     image_score_from_map,
 )
 from .config import config_fingerprint, resolve_output_dir, save_json
-from .data import build_mvtec_records
+from .data import build_records
 from .highres_backbone import (
     HighResolutionCLIPVisionFeatureExtractor,
     clip_patch_grid,
@@ -99,7 +99,7 @@ def evaluate_highres_category(
     category_dir = _category_dir(output_dir, category)
     artifact_dir = category_dir / "artifacts"
     banks, _ = load_memory_banks(artifact_dir / "memory_bank.pt")
-    _, test_records = build_mvtec_records(config["data"]["root"], category)
+    _, test_records = build_records(config["data"]["root"], category, config["data"])
     loader = _highres_loader(test_records, config, include_mask=True)
     map_config = _map_config(config)
     input_size = int(config["data"]["image_size"])

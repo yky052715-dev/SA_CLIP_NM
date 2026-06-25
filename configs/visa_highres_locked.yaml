@@ -1,0 +1,86 @@
+experiment:
+  name: sa_clip_nm_visa_highres_locked
+  protocol_stage: external_validation
+  seed: 42
+  output_dir: outputs/external_validation/visa_highres_locked
+data:
+  dataset: visa
+  root: /home/ubuntu/yyk/datasets/Visa
+  categories:
+  - candle
+  - capsules
+  - cashew
+  - chewinggum
+  - fryum
+  - macaroni1
+  - macaroni2
+  - pcb1
+  - pcb2
+  - pcb3
+  - pcb4
+  - pipe_fryum
+  image_size: 224
+  resize_mode: resize
+  calibration_fraction: 0.2
+  num_workers: 4
+  visa_normal_train_fraction: 0.5
+  visa_split_seed: 42
+high_resolution:
+  evaluation_size: 448
+model:
+  checkpoint: openai/clip-vit-base-patch16
+  candidate_layers:
+  - 3
+  - 6
+  - 9
+  - 12
+  active_layers:
+  - 3
+  - 6
+  token_norm: none
+  batch_size: 8
+memory:
+  sampling: kcenter
+  ratio: 0.1
+  projection_dim: 128
+  max_candidates: 50000
+retrieval:
+  spatial_mode: none
+  fixed_lambda: 0.05
+  query_chunk_size: 256
+  bank_chunk_size: 4096
+  lambda_max: 0.1
+  tau_quantile: 0.8
+calibration:
+  mad_epsilon: 1.0e-06
+  threshold_fit_fraction: 0.5
+  threshold_split_seed: 42
+  pixel_threshold_method: image_max_quantile
+  pixel_quantile: 0.995
+  pixel_image_quantile: 0.95
+  pixel_topk_fraction: 0.01
+  image_quantile: 0.99
+  clamp_min_zero: true
+inference:
+  gaussian_sigma: 0.0
+  image_score: topk_mean
+  image_topk_fraction: 0.01
+  layer_fusion: mean
+  layer_fusion_epsilon: 1.0e-06
+  layer_weights:
+    3: 0.5
+    6: 0.5
+  upsample_mode: bilinear
+  save_visualizations: false
+  max_visualizations_per_category: 10
+diagnostics:
+  enabled: false
+  max_samples_per_category: 10
+localization:
+  enabled: false
+  mode: global
+evaluation:
+  compute_oracle_f1: true
+  save_predictions: false
+  small_max_fraction: 0.005
+  medium_max_fraction: 0.02

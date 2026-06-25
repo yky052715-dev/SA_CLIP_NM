@@ -33,7 +33,7 @@ from .calibration import (
 from .config import config_fingerprint, resolve_output_dir, save_json
 from .data import (
     MVTecImageDataset,
-    build_mvtec_records,
+    build_records,
     collate_records,
     split_calibration_records,
     split_normal_records,
@@ -115,7 +115,7 @@ def prepare_category(
     artifact_dir = category_dir / "artifacts"
     artifact_dir.mkdir(parents=True, exist_ok=True)
 
-    train_records, _ = build_mvtec_records(config["data"]["root"], category)
+    train_records, _ = build_records(config["data"]["root"], category, config["data"])
     memory_records, calibration_records = split_normal_records(
         train_records,
         calibration_fraction=float(config["data"]["calibration_fraction"]),
@@ -591,7 +591,7 @@ def evaluate_category(
     category_dir = _category_dir(output_dir, category)
     artifact_dir = category_dir / "artifacts"
     banks, _ = load_memory_banks(artifact_dir / "memory_bank.pt")
-    _, test_records = build_mvtec_records(config["data"]["root"], category)
+    _, test_records = build_records(config["data"]["root"], category, config["data"])
     loader = _loader(test_records, config, include_mask=True)
 
     image_labels: list[int] = []
