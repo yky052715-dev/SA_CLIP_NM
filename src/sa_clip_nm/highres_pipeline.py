@@ -270,6 +270,12 @@ def evaluate_highres_category(
         "adaptive_max_normal_image_positive_rate": (
             calibration.adaptive_max_normal_image_positive_rate
         ),
+        "adaptive_max_normal_positive_area_p95_fraction": (
+            calibration.adaptive_max_normal_positive_area_p95_fraction
+        ),
+        "adaptive_max_normal_positive_area_max_fraction": (
+            calibration.adaptive_max_normal_positive_area_max_fraction
+        ),
         "normal_pixel_positive_rate": calibration.normal_pixel_positive_rate,
         "normal_image_positive_rate": calibration.normal_image_positive_rate,
         "threshold_fit_images": calibration.threshold_fit_images,

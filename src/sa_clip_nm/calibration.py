@@ -42,6 +42,8 @@ class CategoryCalibration:
     adaptive_selected_pixel_image_quantile: float | None = None
     adaptive_max_normal_image_positive_rate: float | None = None
     adaptive_max_normal_pixel_positive_rate: float | None = None
+    adaptive_max_normal_positive_area_p95_fraction: float | None = None
+    adaptive_max_normal_positive_area_max_fraction: float | None = None
     adaptive_threshold_candidates: list[dict[str, float]] | None = None
 
     def to_dict(self) -> dict[str, object]:
@@ -74,6 +76,12 @@ class CategoryCalibration:
             ),
             "adaptive_max_normal_pixel_positive_rate": (
                 self.adaptive_max_normal_pixel_positive_rate
+            ),
+            "adaptive_max_normal_positive_area_p95_fraction": (
+                self.adaptive_max_normal_positive_area_p95_fraction
+            ),
+            "adaptive_max_normal_positive_area_max_fraction": (
+                self.adaptive_max_normal_positive_area_max_fraction
             ),
             "adaptive_threshold_candidates": (
                 self.adaptive_threshold_candidates
@@ -300,6 +308,147 @@ def adaptive_pixel_threshold_from_maps(
             <= max_normal_image_positive_rate
         )
         if selected is None and image_ok and pixel_ok:
+            selected = candidate
+
+    if selected is None:
+        selected = candidates[-1]
+    return (
+        float(selected["pixel_threshold"]),
+        float(selected["pixel_image_quantile"]),
+        candidates,
+    )
+
+
+def _normal_positive_area_diagnostics(
+    maps: torch.Tensor,
+    threshold: float,
+) -> dict[str, float]:
+    if maps.ndim != 3:
+        raise ValueError("maps must have shape [N, H, W]")
+    predictions = maps.detach().float() >= float(threshold)
+    flattened = predictions.reshape(predictions.shape[0], -1).float()
+    area_fractions = flattened.mean(dim=1).cpu().numpy()
+    positive_pixel_counts = flattened.sum(dim=1).cpu().numpy()
+    return {
+        "normal_positive_area_p95_fraction": float(
+            np.quantile(area_fractions, 0.95)
+        ),
+        "normal_positive_area_max_fraction": float(np.max(area_fractions)),
+        "normal_positive_area_p95_pixels": float(
+            np.quantile(positive_pixel_counts, 0.95)
+        ),
+        "normal_positive_area_max_pixels": float(np.max(positive_pixel_counts)),
+    }
+
+
+def _optional_rate(value: float | None, name: str) -> float | None:
+    if value is None:
+        return None
+    if not 0.0 <= float(value) <= 1.0:
+        raise ValueError(f"{name} must be in [0, 1]")
+    return float(value)
+
+
+def adaptive_area_pixel_threshold_from_maps(
+    threshold_fit_maps: torch.Tensor,
+    normal_validation_maps: torch.Tensor,
+    method: str,
+    pixel_quantile: float,
+    image_quantiles: Sequence[float],
+    topk_fraction: float,
+    max_normal_image_positive_rate: float | None = None,
+    max_normal_pixel_positive_rate: float | None = None,
+    max_normal_positive_area_p95_fraction: float | None = None,
+    max_normal_positive_area_max_fraction: float | None = None,
+) -> tuple[float, float, list[dict[str, float]]]:
+    """Select a normal-only threshold using normal FP and positive-area bounds.
+
+    Unlike adaptive_pixel_threshold_from_maps, image-level FP is optional here.
+    This lets tiny isolated normal positives pass while rejecting candidates that
+    produce large positive regions on normal holdout maps. Candidates should be
+    ordered from permissive to conservative.
+    """
+    if not image_quantiles:
+        raise ValueError("image_quantiles must not be empty")
+    max_normal_image_positive_rate = _optional_rate(
+        max_normal_image_positive_rate,
+        "max_normal_image_positive_rate",
+    )
+    max_normal_pixel_positive_rate = _optional_rate(
+        max_normal_pixel_positive_rate,
+        "max_normal_pixel_positive_rate",
+    )
+    max_normal_positive_area_p95_fraction = _optional_rate(
+        max_normal_positive_area_p95_fraction,
+        "max_normal_positive_area_p95_fraction",
+    )
+    max_normal_positive_area_max_fraction = _optional_rate(
+        max_normal_positive_area_max_fraction,
+        "max_normal_positive_area_max_fraction",
+    )
+    if all(
+        value is None
+        for value in (
+            max_normal_image_positive_rate,
+            max_normal_pixel_positive_rate,
+            max_normal_positive_area_p95_fraction,
+            max_normal_positive_area_max_fraction,
+        )
+    ):
+        raise ValueError("At least one adaptive area constraint is required")
+
+    candidates: list[dict[str, float]] = []
+    selected: dict[str, float] | None = None
+    for quantile in image_quantiles:
+        threshold = pixel_threshold_from_maps(
+            threshold_fit_maps,
+            method=method,
+            pixel_quantile=pixel_quantile,
+            image_quantile=float(quantile),
+            topk_fraction=topk_fraction,
+        )
+        diagnostics = normal_threshold_diagnostics(
+            normal_validation_maps,
+            threshold,
+        )
+        area_diagnostics = _normal_positive_area_diagnostics(
+            normal_validation_maps,
+            threshold,
+        )
+        candidate = {
+            "pixel_image_quantile": float(quantile),
+            "pixel_threshold": float(threshold),
+            "normal_pixel_positive_rate": float(
+                diagnostics["normal_pixel_positive_rate"]
+            ),
+            "normal_image_positive_rate": float(
+                diagnostics["normal_image_positive_rate"]
+            ),
+            **area_diagnostics,
+        }
+        candidates.append(candidate)
+        checks = []
+        if max_normal_image_positive_rate is not None:
+            checks.append(
+                candidate["normal_image_positive_rate"]
+                <= max_normal_image_positive_rate
+            )
+        if max_normal_pixel_positive_rate is not None:
+            checks.append(
+                candidate["normal_pixel_positive_rate"]
+                <= max_normal_pixel_positive_rate
+            )
+        if max_normal_positive_area_p95_fraction is not None:
+            checks.append(
+                candidate["normal_positive_area_p95_fraction"]
+                <= max_normal_positive_area_p95_fraction
+            )
+        if max_normal_positive_area_max_fraction is not None:
+            checks.append(
+                candidate["normal_positive_area_max_fraction"]
+                <= max_normal_positive_area_max_fraction
+            )
+        if selected is None and all(checks):
             selected = candidate
 
     if selected is None:

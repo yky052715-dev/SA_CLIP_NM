@@ -5,6 +5,7 @@ import torch
 
 from sa_clip_nm.backbone import make_patch_coordinates
 from sa_clip_nm.calibration import (
+    adaptive_area_pixel_threshold_from_maps,
     adaptive_pixel_threshold_from_maps,
     calibrate_scores,
     compute_layer_tau,
@@ -230,3 +231,49 @@ def test_binary_metrics_can_use_postprocessed_calibrated_predictions() -> None:
     assert np.isclose(metrics.calibrated_f1, 2.0 / 3.0)
     assert np.isclose(metrics.calibrated_iou, 0.5)
     assert metrics.oracle_f1 >= metrics.calibrated_f1
+
+
+def test_adaptive_area_threshold_allows_tiny_normal_image_triggers() -> None:
+    threshold_fit_maps = torch.tensor([[[1.0]], [[10.0]]])
+    normal_validation_maps = torch.zeros((2, 10, 10), dtype=torch.float32)
+    normal_validation_maps[:, 0, 0] = 2.0
+
+    threshold, selected_quantile, candidates = adaptive_area_pixel_threshold_from_maps(
+        threshold_fit_maps=threshold_fit_maps,
+        normal_validation_maps=normal_validation_maps,
+        method="image_max_quantile",
+        pixel_quantile=0.5,
+        image_quantiles=[0.0, 1.0],
+        topk_fraction=1.0,
+        max_normal_positive_area_p95_fraction=0.02,
+    )
+
+    assert np.isclose(threshold, 1.0)
+    assert np.isclose(selected_quantile, 0.0)
+    assert np.isclose(candidates[0]["normal_image_positive_rate"], 1.0)
+    assert np.isclose(candidates[0]["normal_positive_area_p95_fraction"], 0.01)
+
+
+def test_adaptive_area_threshold_rejects_large_normal_regions() -> None:
+    threshold_fit_maps = torch.tensor([[[1.0]], [[10.0]]])
+    normal_validation_maps = torch.tensor(
+        [
+            [[2.0, 0.0], [0.0, 0.0]],
+            [[2.0, 2.0], [2.0, 2.0]],
+        ]
+    )
+
+    threshold, selected_quantile, candidates = adaptive_area_pixel_threshold_from_maps(
+        threshold_fit_maps=threshold_fit_maps,
+        normal_validation_maps=normal_validation_maps,
+        method="image_max_quantile",
+        pixel_quantile=0.5,
+        image_quantiles=[0.0, 1.0],
+        topk_fraction=1.0,
+        max_normal_positive_area_p95_fraction=0.5,
+    )
+
+    assert np.isclose(threshold, 10.0)
+    assert np.isclose(selected_quantile, 1.0)
+    assert candidates[0]["normal_positive_area_p95_fraction"] > 0.5
+    assert candidates[1]["normal_positive_area_p95_fraction"] == 0.0
